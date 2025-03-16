@@ -39,6 +39,29 @@ out/
 # Large binary assets - only exclude extremely large files
 /app/src/main/assets/ml/models/*.zip
 /app/src/main/assets/ml/models/*.tar.gz
+# Gradle files
+.gradle/
+build/
+
+# Local configuration file (sdk path, etc)
+local.properties
+
+# Log/OS Files
+*.log
+
+# Android Studio generated files and folders
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+output.json
+
+# IntelliJ
+*.iml
+.idea/
+misc.xml
+deploymentTargetDropDown.xml
+render.experimental.xml
 
 # Keystore files
 *.jks
@@ -72,3 +95,9 @@ vcs.xml
 *.hprof
 
 # README - make sure your project has a good README.md with setup instructions!
+
+# Google Services (e.g. APIs or Firebase)
+google-services.json
+
+# Android Profiling
+*.hprof
