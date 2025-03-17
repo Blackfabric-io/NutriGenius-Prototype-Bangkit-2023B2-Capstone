@@ -8,6 +8,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.os.Bundle
 import android.os.Handler
@@ -102,6 +104,10 @@ class ScannerFragment : Fragment() {
             showError("Camera permission is required to use this feature")
         }
     }
+    
+    // Flash components
+    private var cameraControl: CameraControl? = null
+    private var flashEnabled = false
     
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -350,44 +356,161 @@ class ScannerFragment : Fragment() {
         }
     }
     
+    /**
+     * Memulai kamera dengan optimasi untuk demo eksternal dengan Camo
+     */
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(requireContext())
         
         cameraProviderFuture.addListener({
             try {
+                // Get camera provider
                 val cameraProvider = cameraProviderFuture.get()
                 
-                // Preview
-                val preview = Preview.Builder().build().also {
-                    it.setSurfaceProvider(viewFinder.surfaceProvider)
-                }
+                // Konfigurasi preview dengan resolusi optimal untuk demo
+                val preview = Preview.Builder()
+                    .setTargetResolution(Size(1280, 720)) // Resolusi optimal untuk demo
+                    .build()
+                    .also {
+                        it.setSurfaceProvider(viewFinder.surfaceProvider)
+                    }
                 
-                // Image capture dengan rotasi awal
+                // Konfigurasi image capture dengan optimasi resolusi dan latency
                 imageCapture = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                    .setTargetRotation(requireActivity().windowManager.defaultDisplay.rotation)
+                    .setTargetResolution(Size(1280, 720))
+                    .setJpegQuality(85) // Optimasi kualitas vs ukuran file
                     .build()
                 
-                try {
-                    // Unbind any bound use cases before rebinding
-                    cameraProvider.unbindAll()
-                    
-                    // Bind use cases to camera
-                    cameraProvider.bindToLifecycle(
-                        this, 
-                        CameraSelector.DEFAULT_BACK_CAMERA,
-                        preview, 
-                        imageCapture
-                    )
-                } catch (e: Exception) {
-                    Log.e(TAG, "Use case binding failed", e)
-                    showError("Could not initialize camera: ${e.message}")
+                // Konfigurasi image analysis jika diperlukan
+                val imageAnalysis = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+                
+                // Select camera - prioritaskan kamera belakang
+                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                
+                // Unbind semua use case sebelum rebind
+                cameraProvider.unbindAll()
+                
+                // Bind use cases ke lifecycle
+                val camera = cameraProvider.bindToLifecycle(
+                    viewLifecycleOwner,
+                    cameraSelector,
+                    preview,
+                    imageCapture,
+                    imageAnalysis
+                )
+                
+                // Setup torch/flash jika tersedia (opsional untuk demo)
+                if (camera.cameraInfo.hasFlashUnit()) {
+                    cameraControl = camera.cameraControl
+                    setupFlashButton()
+                } else {
+                    // Sembunyikan tombol flash jika tidak tersedia
+                    view?.findViewById<Button>(R.id.flash_button)?.visibility = View.GONE
                 }
+                
+                // Log untuk keperluan debugging
+                Log.d(TAG, "Camera setup successfully with resolution: 1280x720")
+                
             } catch (e: Exception) {
-                Log.e(TAG, "Camera provider error: ${e.message}", e)
-                showError("Camera initialization failed")
+                Log.e(TAG, "Camera setup failed: ${e.message}", e)
+                showError("Tidak dapat memulai kamera. Silakan periksa izin dan koneksi kamera.")
             }
         }, ContextCompat.getMainExecutor(requireContext()))
+    }
+    
+    /**
+     * Setup tombol flash jika kamera mendukung
+     */
+    private fun setupFlashButton() {
+        view?.findViewById<Button>(R.id.flash_button)?.apply {
+            visibility = View.VISIBLE
+            setOnClickListener {
+                toggleFlash()
+            }
+        }
+    }
+    
+    /**
+     * Toggle flash on/off
+     */
+    private fun toggleFlash() {
+        flashEnabled = !flashEnabled
+        cameraControl?.enableTorch(flashEnabled)
+        
+        // Update UI button flash
+        view?.findViewById<Button>(R.id.flash_button)?.text = 
+            if (flashEnabled) "Flash: ON" else "Flash: OFF"
+    }
+    
+    /**
+     * Proses gambar yang ditangkap dengan optimasi untuk demo
+     */
+    private fun processImage(bitmap: Bitmap) {
+        try {
+            // Tampilkan indikator proses
+            view?.findViewById<ProgressBar>(R.id.processingProgressBar)?.visibility = View.VISIBLE
+            
+            when (currentScanMode) {
+                ScanMode.OBJECT_DETECTION -> {
+                    // Process using food detector
+                    detectObject(bitmap)
+                }
+                ScanMode.FACE_DETECTION -> {
+                    // Process using face detector
+                    detectFace(bitmap)
+                }
+                ScanMode.TEXT_DETECTION -> {
+                    // Process using text detector with enhanced contrast for demo
+                    val enhancedBitmap = enhanceImageForTextDetection(bitmap)
+                    detectText(enhancedBitmap)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error processing image: ${e.message}", e)
+            showError("Gagal memproses gambar: ${e.message}")
+            
+            // Sembunyikan indikator
+            view?.findViewById<ProgressBar>(R.id.processingProgressBar)?.visibility = View.GONE
+        }
+    }
+    
+    /**
+     * Meningkatkan kualitas gambar untuk deteksi teks
+     * Optimasi khusus untuk demo dengan Camo
+     */
+    private fun enhanceImageForTextDetection(bitmap: Bitmap): Bitmap {
+        return try {
+            val width = bitmap.width
+            val height = bitmap.height
+            
+            // Buat bitmap baru dengan konfigurasi yang sama
+            val enhancedBitmap = Bitmap.createBitmap(width, height, bitmap.config)
+            
+            // Canvas untuk menggambar
+            val canvas = Canvas(enhancedBitmap)
+            
+            // Tingkatkan kontras dan saturasi dengan ColorMatrix
+            val paint = Paint()
+            val colorMatrix = ColorMatrix()
+            
+            // Kontras lebih tinggi untuk teks
+            colorMatrix.setScale(1.2f, 1.2f, 1.2f, 1.0f)
+            
+            paint.colorFilter = ColorMatrixColorFilter(colorMatrix)
+            canvas.drawBitmap(bitmap, 0f, 0f, paint)
+            
+            // Log untuk keperluan debugging
+            Log.d(TAG, "Image enhanced for text detection: ${width}x${height}")
+            
+            enhancedBitmap
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to enhance image: ${e.message}", e)
+            // Kembalikan bitmap asli jika terjadi error
+            bitmap
+        }
     }
     
     private fun takePhoto() {
@@ -430,7 +553,7 @@ class ScannerFragment : Fragment() {
                         requireContext().contentResolver.openInputStream(savedUri)?.use { inputStream ->
                             val bitmap = BitmapFactory.decodeStream(inputStream)
                             // Process image in background
-                            processImageAsync(bitmap)
+                            processImage(bitmap)
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Error loading image: ${e.message}", e)
